@@ -1,0 +1,347 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>SkyPulse Weather Pro</title>
+
+<script src="https://code.jquery.com/jquery-3.6.0.min.js"></script>
+<script src="https://momentjs.com/downloads/moment.min.js"></script>
+
+<style>
+    /* ------------------------------
+        BODY + BACKGROUNDS
+    ------------------------------ */
+    body {
+        margin: 0;
+        font-family: 'Montserrat', sans-serif;
+        display: flex;
+        min-height: 100vh;
+        justify-content: center;
+        align-items: flex-start;
+        /* New gradient sky-blue background */
+        background: linear-gradient(to bottom, #87CEFA, #84d4ef);
+        transition: background 0.5s;
+        overflow-x: hidden;
+    }
+    body.dark-mode {
+        background: linear-gradient(135deg,#0a0a0a,#1c1c1c);
+        color: #fff;
+    }
+
+    canvas#weather-canvas {
+        position: fixed;
+        width: 100%;
+        height: 100%;
+        top:0; left:0;
+        z-index:0;
+        pointer-events:none;
+    }
+
+    /* ------------------------------
+        MAIN CARD
+    ------------------------------ */
+    #app {
+        position: relative;
+        z-index: 1;
+        width: 95%;
+        max-width: 900px;
+        padding: 25px;
+        margin-top: 30px;
+        border-radius: 20px;
+        backdrop-filter: blur(20px);
+        background: rgba(255,255,255,0.15);
+        box-shadow: 0 25px 60px rgba(0,0,0,0.3);
+        text-align: center;
+        transition: background 0.5s, color 0.5s;
+    }
+    body.dark-mode #app {
+        background: rgba(0,0,0,0.35);
+    }
+
+    input, button {
+        padding: 10px 15px;
+        border-radius: 25px;
+        border: none;
+        font-size: 1rem;
+        margin: 5px;
+        cursor: pointer;
+        transition: 0.3s;
+    }
+
+    input {
+        width: 60%;
+        max-width: 250px;
+    }
+
+    button:hover {
+        transform: scale(1.05);
+    }
+
+    #unit-toggle, #dark-mode-toggle {
+        width: 50px;
+        height: 50px;
+        border-radius: 50%;
+    }
+
+    /* ------------------------------
+        WEATHER INFO
+    ------------------------------ */
+    #weather-info {
+        display: none;
+        margin-top: 20px;
+    }
+    #weather-icon {
+        width: 100px;
+        height: 100px;
+    }
+    h1 { font-size: 3rem; margin: 10px 0; }
+
+    /* ------------------------------
+        FORECAST
+    ------------------------------ */
+    #forecast {
+        display: none;
+        margin-top: 30px;
+    }
+    #forecast-list {
+        display: flex;
+        justify-content: center;
+        flex-wrap: wrap;
+        gap: 15px;
+    }
+    .forecast-item {
+        width: 120px;
+        border-radius: 15px;
+        padding: 10px;
+        background: rgba(255,255,255,0.2);
+        backdrop-filter: blur(10px);
+        text-align: center;
+        transition: transform 0.3s;
+    }
+    .forecast-item:hover { transform: translateY(-5px); }
+    body.dark-mode .forecast-item { background: rgba(0,0,0,0.3); }
+
+    .forecast-item img, .forecast-item span {
+        width: 50px;
+        height: 50px;
+        display: inline-block;
+        font-size: 2rem;
+        margin: 5px 0;
+    }
+
+    /* ------------------------------
+        SIDEBAR FAVOURITES
+    ------------------------------ */
+    #favourites {
+        position: fixed;
+        left: 0; top:0;
+        width: 200px;
+        height: 100%;
+        background: rgba(255,255,255,0.15);
+        backdrop-filter: blur(15px);
+        box-shadow: 2px 0 10px rgba(0,0,0,0.2);
+        padding: 10px;
+        overflow-y: auto;
+        z-index:2;
+    }
+    body.dark-mode #favourites {
+        background: rgba(0,0,0,0.35);
+    }
+    .fav-item {
+        padding: 8px;
+        margin: 5px 0;
+        border-radius: 10px;
+        cursor: pointer;
+        display: flex;
+        justify-content: space-between;
+        align-items: center;
+        background: rgba(255,255,255,0.15);
+    }
+    body.dark-mode .fav-item {
+        background: rgba(0,0,0,0.25);
+    }
+</style>
+</head>
+<body>
+
+<canvas id="weather-canvas"></canvas>
+
+<div id="favourites">
+    <h3>Favourites</h3>
+    <div id="fav-list">No favourites yet.</div>
+</div>
+
+<div id="app">
+    <h2>🌦 SkyPulse Weather</h2>
+
+    <input id="city-input" placeholder="Enter city">
+    <button id="city-input-btn">Search</button>
+    <button id="location-btn">📍 My Location</button>
+    <br>
+    <button id="unit-toggle">°C</button>
+    <button id="dark-mode-toggle">🌙</button>
+
+    <div id="loading">Loading…</div>
+    <p id="error" style="color:red;"></p>
+
+    <div id="weather-info">
+        <h2 id="city-name"></h2>
+        <p id="date"></p>
+        <img id="weather-icon" src="">
+        <h1 id="temperature"></h1>
+        <p id="description"></p>
+        <p id="wind-speed"></p>
+    </div>
+
+    <div id="forecast">
+        <h3>5-Day Forecast</h3>
+        <div id="forecast-list"></div>
+    </div>
+</div>
+
+<script>
+let isCelsius = true;
+let weatherType = "clear";
+let particles = [];
+
+/* PARTICLE ENGINE (RAIN/SNOW) */
+const canvas = document.getElementById('weather-canvas');
+const ctx = canvas.getContext('2d');
+function resizeCanvas(){ canvas.width=window.innerWidth; canvas.height=window.innerHeight; }
+window.addEventListener('resize', resizeCanvas);
+resizeCanvas();
+
+function createParticles(type){
+    particles=[];
+    const count=type==="rain"?200:type==="snow"?150:0;
+    for(let i=0;i<count;i++){
+        particles.push({
+            x:Math.random()*canvas.width,
+            y:Math.random()*canvas.height,
+            size:type==="snow"?Math.random()*3+1:Math.random()*1.5+0.5,
+            speed:type==="snow"?Math.random()*1+0.5:Math.random()*4+2,
+            drift:type==="snow"?Math.random()*1-0.5:0
+        });
+    }
+}
+function animateParticles(){
+    ctx.clearRect(0,0,canvas.width,canvas.height);
+    particles.forEach(p=>{
+        ctx.beginPath();
+        ctx.fillStyle=weatherType==="snow"?"#fff":"#9cc9ff";
+        ctx.arc(p.x,p.y,p.size,0,Math.PI*2);
+        ctx.fill();
+        p.y+=p.speed;
+        p.x+=p.drift;
+        if(p.y>canvas.height){p.y=-10;p.x=Math.random()*canvas.width;}
+        if(p.x>canvas.width||p.x<0)p.x=Math.random()*canvas.width;
+    });
+    requestAnimationFrame(animateParticles);
+}
+createParticles(weatherType);
+animateParticles();
+
+/* HELPER FUNCTIONS */
+function weatherName(code){
+    const map={0:"Clear Sky",1:"Mainly Clear",2:"Partly Cloudy",3:"Overcast",
+        45:"Fog",48:"Rime Fog",51:"Light Drizzle",53:"Drizzle",55:"Dense Drizzle",
+        56:"Freezing Drizzle",57:"Freezing Drizzle",61:"Light Rain",63:"Rain",65:"Heavy Rain",
+        66:"Freezing Rain",67:"Freezing Rain",71:"Light Snow",73:"Snow",75:"Heavy Snow",
+        77:"Snow Grains",80:"Rain Showers",81:"Rain Showers",82:"Violent Showers",
+        85:"Snow Showers",86:"Snow Showers",95:"Thunderstorm",96:"Thunderstorm w/ Hail",99:"Thunderstorm w/ Heavy Hail"};
+    return map[code]||"Unknown";
+}
+function getIconURL(code){
+    const map={0:"clear-day",1:"mostly-clear-day",2:"partly-cloudy-day",3:"overcast",
+        45:"fog",48:"fog",51:"drizzle",53:"drizzle",55:"drizzle",56:"sleet",57:"sleet",
+        61:"rain",63:"rain",65:"rain",66:"sleet",67:"sleet",71:"snow",73:"snow",75:"snow",
+        80:"rain",81:"rain",82:"rain",85:"snow",86:"snow",95:"thunderstorms",96:"thunderstorms",99:"thunderstorms"};
+    return `https://basmilius.github.io/weather-icons/production/fill/all/${map[code]||"unknown"}.svg`;
+}
+
+/* SHOW WEATHER */
+function showLoading(){ $('#loading').show();}
+function hideLoading(){ $('#loading').hide();}
+function showError(msg){ $('#error').text(msg); setTimeout(()=>$('#error').text(""),3000);}
+
+/* MAIN LOGIC */
+$(document).ready(()=>{ weatherFn("Pune"); });
+
+$('#city-input-btn').click(()=>{ const city=$('#city-input').val().trim(); if(city) weatherFn(city); });
+$('#location-btn').click(()=>{ if(navigator.geolocation){ navigator.geolocation.getCurrentPosition(pos=>{ weatherFnByCoords(pos.coords.latitude,pos.coords.longitude); }, ()=>showError("Location permission denied.")); } else showError("Geolocation not supported."); });
+$('#unit-toggle').click(()=>{ isCelsius=!isCelsius; $('#unit-toggle').text(isCelsius?"°C":"°F"); if(window.lastCity) weatherFn(window.lastCity); });
+$('#dark-mode-toggle').click(()=>{$('body').toggleClass("dark-mode");});
+
+/* FETCH WEATHER */
+async function weatherFn(city){ window.lastCity=city; showLoading(); try{ const geoRes=await fetch(`https://geocoding-api.open-meteo.com/v1/search?name=${city}`); const geoData=await geoRes.json(); if(!geoData.results||geoData.results.length===0){ showError("City not found"); hideLoading(); return; } const {latitude,longitude,name,country}=geoData.results[0]; fetchWeather(latitude,longitude,name,country);}catch{ showError("Network error"); hideLoading(); } }
+function weatherFnByCoords(lat,lon){ fetchWeather(lat,lon,"Your Location",""); }
+
+async function fetchWeather(lat,lon,city,country){
+    try{
+        const url=`https://api.open-meteo.com/v1/forecast?latitude=${lat}&longitude=${lon}&current_weather=true&daily=weathercode,temperature_2m_max,temperature_2m_min&timezone=auto`;
+        const res=await fetch(url);
+        const data=await res.json();
+        window.currentWeatherData=data;
+
+        const code=data.current_weather.weathercode;
+        weatherType=code>=61&&code<=82?"rain":(code>=71&&code<=86?"snow":"clear");
+        createParticles(weatherType);
+
+        weatherShowFn({city,country,...data.current_weather});
+        showForecast(data.daily);
+    }catch{ showError("Weather fetch error"); }
+    hideLoading();
+}
+
+function weatherShowFn(data){
+    $('#weather-info').fadeIn();
+    $('#city-name').text(`${data.city}${data.country? ", "+data.country:""}`);
+    $('#date').text(moment().format("MMMM Do, h:mm a"));
+
+    let temp=data.temperature;
+    if(!isCelsius) temp=(temp*9/5)+32;
+    $('#temperature').html(`<b>${temp.toFixed(1)}°${isCelsius?"C":"F"}</b>`);
+    $('#description').text(weatherName(data.weathercode));
+    $('#wind-speed').text("Wind: "+data.windspeed+" km/h");
+    $('#weather-icon').attr("src",getIconURL(data.weathercode));
+}
+
+/* -----------------------------
+   FORECAST WITH SYMBOLS
+----------------------------- */
+function showForecast(daily){
+    $('#forecast').fadeIn();
+    $('#forecast-list').empty();
+
+    function getForecastSymbol(code){
+        if(code===0||code===1) return "☀️";
+        if(code>=2&&code<=3) return "⛅";
+        if(code>=45&&code<=48) return "🌫️";
+        if(code>=51&&code<=57) return "🌦️";
+        if(code>=61&&code<=67) return "🌧️";
+        if(code>=71&&code<=86) return "❄️";
+        if(code>=95&&code<=99) return "⛈️";
+        return "🌈";
+    }
+
+    for(let i=0;i<5;i++){
+        const date=moment(daily.time[i]).format("MMM D");
+        const symbol=getForecastSymbol(daily.weathercode[i]);
+        const desc=weatherName(daily.weathercode[i]);
+        const max=daily.temperature_2m_max[i];
+        const min=daily.temperature_2m_min[i];
+
+        $('#forecast-list').append(`
+            <div class="forecast-item">
+                <p>${date}</p>
+                <span>${symbol}</span>
+                <p>${max}° / ${min}°</p>
+                <p>${desc}</p>
+            </div>
+        `);
+    }
+}
+</script>
+</body>
+</html>
